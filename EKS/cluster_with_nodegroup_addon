@@ -17,14 +17,7 @@ Parameters:
       - '1.29'
       - '1.30'
       - '1.31'
-  CoreDnsAddonVersion:
-    Type: String
-    Default: 'v1.10.1-eksbuild.18'
-    Description: CoreDNS version for the EKS cluster
-    AllowedValues:
-      - v1.10.1-eksbuild.18
-      - v1.10.1-eksbuild.17
-      - v1.10.1-eksbuild.16
+
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC where the EKS cluster will be created
@@ -174,8 +167,7 @@ Resources:
     Properties:
       AddonName: coredns
       ClusterName: !Ref ClusterName
-      AddonVersion: !Ref CoreDnsAddonVersion
-      
+      #AddonVersion: auto
       ResolveConflicts: OVERWRITE
 
   KubeProxyAddon:
@@ -195,3 +187,93 @@ Resources:
       ClusterName: !Ref ClusterName
       #AddonVersion: auto
       ResolveConflicts: OVERWRITE
+
+  EbsCsiDriverAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: EksNodeGroup
+    Properties:
+      AddonName: aws-ebs-csi-driver
+      ClusterName: !Ref ClusterName
+      #AddonVersion: auto
+      ResolveConflicts: OVERWRITE
+      ServiceAccountRoleArn: !GetAtt EbsCsiDriverRole.Arn
+
+  #IAM Role for EBS CSI Driver
+  EbsCsiDriverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/${EksOidcProviderUrl}'
+            Action: sts:AssumeRoleWithWebIdentity
+            #Condition:
+              #StringEquals:
+                #!Sub '${EksOidcProviderUrl}:sub': 'system:serviceaccount:kube-system:ebs-csi-controller-sa'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+
+  # Extract OIDC Provider URL from EKS Cluster
+  # EksOidcProviderUrl:
+  #   Type: Custom::EksOidcProviderUrl
+  #   Properties:
+  #     ServiceToken: !GetAtt OidcProviderUrlFunction.Arn
+  #     ClusterName: !Ref ClusterName
+
+  # Lambda Function to extract OIDC Provider URL
+  OidcProviderUrlFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+
+          def handler(event, context):
+            responseData = {}
+            try:
+              if event['RequestType'] == 'Delete':
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+                return
+
+              cluster_name = event['ResourceProperties']['ClusterName']
+              eks_client = boto3.client('eks')
+              
+              response = eks_client.describe_cluster(name=cluster_name)
+              oidc_issuer = response['cluster']['identity']['oidc']['issuer']
+              oidc_provider_url = oidc_issuer.replace('https://', '')
+              
+              responseData['OidcProviderUrl'] = oidc_provider_url
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, oidc_provider_url)
+            except Exception as e:
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+
+  #IAM Role for Lambda Function
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EksDescribeCluster
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: eks:DescribeCluster
+                Resource: !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
