@@ -11,7 +11,7 @@ This repository provides Infrastructure as Code (IaC) templates for deploying an
 
 The EKS directory contains modular templates for:
 
-    + Cluster configuration
-    + Node group management
-    + Add-on versioning
-    + Network settings
++ Cluster configuration
++ Node group management
++ Add-on versioning
++ Network settings
