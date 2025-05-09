@@ -17,6 +17,14 @@ Parameters:
       - '1.29'
       - '1.30'
       - '1.31'
+  CoreDnsAddonVersion:
+    Type: String
+    Default: 'v1.10.1-eksbuild.18'
+    Description: CoreDNS version for the EKS cluster
+    AllowedValues:
+      - v1.10.1-eksbuild.18
+      - v1.10.1-eksbuild.17
+      - v1.10.1-eksbuild.16
 
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -167,8 +175,7 @@ Resources:
     Properties:
       AddonName: coredns
       ClusterName: !Ref ClusterName
-      #AddonVersion: auto
-      ResolveConflicts: OVERWRITE
+      AddonVersion: !Ref CoreDnsAddonVersion
 
   KubeProxyAddon:
     Type: AWS::EKS::Addon
@@ -277,3 +284,10 @@ Resources:
               - Effect: Allow
                 Action: eks:DescribeCluster
                 Resource: !Sub 'arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'
+
+#Conditions:
+  #HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+
+#Outputs:
+  #ClusterName:
+    #Description: The name of the EKS cluster
